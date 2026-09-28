@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import 'wardrobe_store.dart';
+import '../services/vestra_wardrobe_ai_service.dart';
 
 class WardrobeScreen extends StatefulWidget {
   const WardrobeScreen({super.key});
@@ -19,6 +20,11 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
   static const Color softWhite = Color(0xFFF5F1E8);
 
   final ImagePicker _imagePicker = ImagePicker();
+
+  static const String _backendUrl = String.fromEnvironment(
+    'VESTRA_BACKEND_URL',
+    defaultValue: 'http://localhost:3000',
+  );
 
   List<Map<String, String>> get wardrobe => WardrobeStore.items;
 
@@ -247,6 +253,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
                         children: filteredWardrobe.map((item) {
                           return _WardrobeItemCard(
                             item: item,
+                            onEdit: () => _showEditItemSheet(item),
                             onDelete: () => _deleteItem(item),
                           );
                         }).toList(),
@@ -310,9 +317,20 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
   // ================================================================
 
   Widget _buildEmptyState() {
+    final bool isAll = selectedCategory == 'All';
+    final String title = isAll
+        ? 'Your wardrobe is empty'
+        : 'No ${selectedCategory.toLowerCase()} yet';
+    final String description = isAll
+        ? 'Add pieces you already own and Vestra will learn what is available to you.'
+        : 'You do not have any ${selectedCategory.toLowerCase()} in your wardrobe yet. Add one and Vestra will keep it organized here.';
+    final String buttonLabel = isAll
+        ? 'ADD YOUR FIRST ITEM'
+        : 'ADD ${selectedCategory.toUpperCase()}';
+
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 25, vertical: 45),
+      padding: const EdgeInsets.symmetric(horizontal: 25, vertical: 38),
       decoration: BoxDecoration(
         color: card,
         borderRadius: BorderRadius.circular(22),
@@ -327,39 +345,52 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
               color: const Color(0xFF24200F),
               borderRadius: BorderRadius.circular(22),
             ),
-            child: const Icon(Icons.checkroom_outlined, color: gold, size: 34),
+            child: Icon(
+              isAll
+                  ? Icons.checkroom_outlined
+                  : _categoryIcon(selectedCategory),
+              color: gold,
+              size: 34,
+            ),
           ),
-
           const SizedBox(height: 18),
-
-          const Text(
-            'Your wardrobe is empty',
-            style: TextStyle(
+          Text(
+            title,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
               color: softWhite,
               fontSize: 18,
               fontWeight: FontWeight.w600,
             ),
           ),
-
           const SizedBox(height: 8),
-
-          const Text(
-            'Add pieces you already own and Vestra '
-            'will learn what is available to you.',
+          Text(
+            description,
             textAlign: TextAlign.center,
-            style: TextStyle(color: Colors.white60, fontSize: 13, height: 1.5),
+            style: const TextStyle(
+              color: Colors.white60,
+              fontSize: 13,
+              height: 1.5,
+            ),
           ),
-
           const SizedBox(height: 20),
-
-          TextButton(
+          ElevatedButton.icon(
             onPressed: _showAddItemSheet,
-            child: const Text(
-              'ADD YOUR FIRST ITEM',
-              style: TextStyle(
-                color: gold,
+            icon: const Icon(Icons.add, size: 18),
+            label: Text(
+              buttonLabel,
+              style: const TextStyle(
                 fontWeight: FontWeight.bold,
-                letterSpacing: 1,
+                letterSpacing: .7,
+              ),
+            ),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: gold,
+              foregroundColor: Colors.black,
+              elevation: 0,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 13),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
               ),
             ),
           ),
@@ -368,17 +399,61 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
     );
   }
 
+  IconData _categoryIcon(String category) {
+    switch (category) {
+      case 'Tops':
+        return Icons.checkroom_outlined;
+      case 'Bottoms':
+        return Icons.dry_cleaning_outlined;
+      case 'Dresses':
+      case 'Skirts':
+        return Icons.woman_outlined;
+      case 'Jumpsuits':
+        return Icons.accessibility_new_outlined;
+      case 'Shoes':
+        return Icons.shopping_bag_outlined;
+      case 'Outerwear':
+        return Icons.layers_outlined;
+      case 'Accessories':
+        return Icons.watch_outlined;
+      case 'Bags':
+        return Icons.shopping_bag_outlined;
+      case 'Headwear':
+        return Icons.face_outlined;
+      case 'Activewear':
+        return Icons.fitness_center_outlined;
+      case 'Swimwear':
+        return Icons.pool_outlined;
+      case 'Traditional Wear':
+        return Icons.auto_awesome_outlined;
+      case 'Pet Clothing':
+        return Icons.pets_outlined;
+      default:
+        return Icons.checkroom_outlined;
+    }
+  }
+
   // ================================================================
   // ADD ITEM SHEET
   // ================================================================
 
+  // ================================================================
+  // ADD TO WARDROBE CHOOSER
+  // ================================================================
+
   void _showAddItemSheet() {
+    _showSingleItemSheet();
+  }
+
+  void _showSingleItemSheet() {
     final colorController = TextEditingController();
     final notesController = TextEditingController();
 
     String category = 'Tops';
     String? imageData;
+    String? aiDetectedName;
     bool isPickingImage = false;
+    bool isAnalyzingImage = false;
 
     final Map<String, String> details = {};
 
@@ -397,6 +472,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
             Future<void> selectImage(ImageSource source) async {
               setSheetState(() {
                 isPickingImage = true;
+                isAnalyzingImage = false;
               });
 
               try {
@@ -415,19 +491,147 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
                 }
 
                 final bytes = await picked.readAsBytes();
+                final encodedImage = base64Encode(bytes);
 
                 setSheetState(() {
-                  imageData = base64Encode(bytes);
+                  imageData = encodedImage;
                   isPickingImage = false;
-                });
-              } catch (error) {
-                setSheetState(() {
-                  isPickingImage = false;
+                  isAnalyzingImage = true;
                 });
 
-                if (!sheetContext.mounted) {
-                  return;
+                try {
+                  final detected =
+                      await VestraWardrobeAIService.analyzeClothingPhoto(
+                        imageBase64: encodedImage,
+                      );
+
+                  if (!sheetContext.mounted) return;
+
+                  final detectedCategory = detected['category']?.trim() ?? '';
+
+                  final detectedColor = detected['color']?.trim() ?? '';
+
+                  final detectedStyle = detected['style']?.trim() ?? '';
+
+                  final detectedFit = detected['fit']?.trim() ?? '';
+
+                  final detectedLength = detected['length']?.trim() ?? '';
+
+                  final detectedMaterial = detected['material']?.trim() ?? '';
+
+                  final detectedPattern = detected['pattern']?.trim() ?? '';
+
+                  final detectedNotes = detected['notes']?.trim() ?? '';
+
+                  setSheetState(() {
+                    isAnalyzingImage = false;
+
+                    aiDetectedName = detected['name']?.trim().isNotEmpty == true
+                        ? detected['name']!.trim()
+                        : null;
+
+                    if (categories.contains(detectedCategory) &&
+                        detectedCategory != 'All') {
+                      category = detectedCategory;
+                    }
+
+                    if (detectedColor.isNotEmpty &&
+                        detectedColor.toLowerCase() != 'unknown') {
+                      colorController.text = detectedColor;
+                    }
+
+                    details.clear();
+
+                    final fieldsForCategory = _getCategoryFields(category);
+
+                    void setDetailIfValid(String label, String value) {
+                      if (value.isEmpty || value.toLowerCase() == 'unknown') {
+                        return;
+                      }
+
+                      Map<String, dynamic>? matchingField;
+
+                      for (final field in fieldsForCategory) {
+                        if (field['label'] == label) {
+                          matchingField = field;
+                          break;
+                        }
+                      }
+
+                      if (matchingField == null) {
+                        return;
+                      }
+
+                      final options = List<String>.from(
+                        matchingField['options'] as List,
+                      );
+
+                      final exactMatch = options.firstWhere(
+                        (option) => option.toLowerCase() == value.toLowerCase(),
+                        orElse: () => '',
+                      );
+
+                      if (exactMatch.isNotEmpty) {
+                        details[label] = exactMatch;
+                      }
+                    }
+
+                    setDetailIfValid('Style', detectedStyle);
+
+                    setDetailIfValid('Fit', detectedFit);
+
+                    setDetailIfValid('Length', detectedLength);
+
+                    setDetailIfValid('Material', detectedMaterial);
+
+                    setDetailIfValid('Pattern', detectedPattern);
+
+                    if (detectedNotes.isNotEmpty &&
+                        detectedNotes.toLowerCase() != 'unknown') {
+                      notesController.text = detectedNotes;
+                    }
+                  });
+                } on VestraWardrobeAIException catch (error) {
+                  if (!sheetContext.mounted) return;
+
+                  setSheetState(() {
+                    isAnalyzingImage = false;
+                  });
+
+                  ScaffoldMessenger.of(sheetContext).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        'Photo added, but Vestra could not '
+                        'analyze it. ${error.message}',
+                      ),
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                } catch (_) {
+                  if (!sheetContext.mounted) return;
+
+                  setSheetState(() {
+                    isAnalyzingImage = false;
+                  });
+
+                  ScaffoldMessenger.of(sheetContext).showSnackBar(
+                    const SnackBar(
+                      content: Text(
+                        'Photo added, but Vestra could not '
+                        'analyze it. You can still enter '
+                        'the details manually.',
+                      ),
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
                 }
+              } catch (_) {
+                setSheetState(() {
+                  isPickingImage = false;
+                  isAnalyzingImage = false;
+                });
+
+                if (!sheetContext.mounted) return;
 
                 ScaffoldMessenger.of(sheetContext).showSnackBar(
                   const SnackBar(
@@ -460,15 +664,38 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
                       ),
                     ),
 
-                    const SizedBox(height: 25),
+                    const SizedBox(height: 14),
 
-                    const Text(
-                      'Add to your wardrobe',
-                      style: TextStyle(
-                        color: softWhite,
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                      ),
+                    Row(
+                      children: [
+                        IconButton(
+                          onPressed: () {
+                            Navigator.pop(sheetContext);
+                          },
+                          icon: const Icon(
+                            Icons.arrow_back_ios_new,
+                            color: gold,
+                            size: 20,
+                          ),
+                          tooltip: 'Back to wardrobe',
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(
+                            minWidth: 40,
+                            minHeight: 40,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        const Expanded(
+                          child: Text(
+                            'Add to your wardrobe',
+                            style: TextStyle(
+                              color: softWhite,
+                              fontSize: 24,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
 
                     const SizedBox(height: 8),
@@ -491,6 +718,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
                     _buildPhotoPicker(
                       imageData: imageData,
                       isPickingImage: isPickingImage,
+                      isAnalyzingImage: isAnalyzingImage,
                       onCamera: () {
                         selectImage(ImageSource.camera);
                       },
@@ -500,9 +728,53 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
                       onRemove: () {
                         setSheetState(() {
                           imageData = null;
+                          aiDetectedName = null;
+                          isAnalyzingImage = false;
                         });
                       },
                     ),
+
+                    const SizedBox(height: 12),
+
+                    if (isAnalyzingImage)
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 15,
+                          vertical: 13,
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF24200F),
+                          borderRadius: BorderRadius.circular(15),
+                          border: Border.all(
+                            color: gold.withValues(alpha: 0.25),
+                          ),
+                        ),
+                        child: const Row(
+                          children: [
+                            SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                color: gold,
+                                strokeWidth: 2,
+                              ),
+                            ),
+                            SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                'VESTRA IS ANALYZING YOUR CLOTHING...',
+                                style: TextStyle(
+                                  color: gold,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                  letterSpacing: 0.7,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
 
                     const SizedBox(height: 25),
 
@@ -557,6 +829,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
                             setSheetState(() {
                               category = value;
                               details.clear();
+                              aiDetectedName = null;
                             });
                           },
                         ),
@@ -651,11 +924,14 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
                             return;
                           }
 
-                          final String generatedName = _generateItemName(
-                            category,
-                            colorController.text.trim(),
-                            details,
-                          );
+                          final String generatedName =
+                              (aiDetectedName?.trim().isNotEmpty == true)
+                              ? aiDetectedName!.trim()
+                              : _generateItemName(
+                                  category,
+                                  colorController.text.trim(),
+                                  details,
+                                );
 
                           final Map<String, String> item = {
                             'name': generatedName,
@@ -719,12 +995,386 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
   }
 
   // ================================================================
+  // EDIT WARDROBE ITEM
+  // ================================================================
+
+  void _showEditItemSheet(Map<String, String> item) {
+    final colorController = TextEditingController(text: item['color'] ?? '');
+
+    final notesController = TextEditingController(text: item['notes'] ?? '');
+
+    String category = item['category'] ?? 'Tops';
+    String? imageData = item['imageData'];
+
+    final Map<String, String> details = {};
+
+    void loadDetailsForCategory(String selectedCategory) {
+      details.clear();
+
+      final ignoredKeys = {
+        'id',
+        'name',
+        'category',
+        'color',
+        'notes',
+        'imageData',
+      };
+
+      final fields = _getCategoryFields(selectedCategory);
+
+      for (final entry in item.entries) {
+        if (ignoredKeys.contains(entry.key) || entry.value.isEmpty) {
+          continue;
+        }
+
+        for (final field in fields) {
+          final label = field['label'] as String;
+          if (_normalizeKey(label) == entry.key) {
+            final options = List<String>.from(field['options'] as List);
+            final matchingOption = options.firstWhere(
+              (option) => option.toLowerCase() == entry.value.toLowerCase(),
+              orElse: () => '',
+            );
+
+            if (matchingOption.isNotEmpty) {
+              details[label] = matchingOption;
+            }
+            break;
+          }
+        }
+      }
+    }
+
+    loadDetailsForCategory(category);
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: black,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (sheetContext, setSheetState) {
+            final fields = _getCategoryFields(category);
+
+            Future<void> pickReplacementImage(ImageSource source) async {
+              try {
+                final XFile? picked = await _imagePicker.pickImage(
+                  source: source,
+                  imageQuality: 80,
+                  maxWidth: 1200,
+                  maxHeight: 1200,
+                );
+
+                if (picked == null) return;
+
+                final bytes = await picked.readAsBytes();
+
+                setSheetState(() {
+                  imageData = base64Encode(bytes);
+                });
+              } catch (_) {
+                if (!sheetContext.mounted) return;
+
+                ScaffoldMessenger.of(sheetContext).showSnackBar(
+                  const SnackBar(
+                    content: Text('Unable to select that image.'),
+                    behavior: SnackBarBehavior.floating,
+                  ),
+                );
+              }
+            }
+
+            return Padding(
+              padding: EdgeInsets.only(
+                left: 20,
+                right: 20,
+                top: 25,
+                bottom: MediaQuery.of(sheetContext).viewInsets.bottom + 25,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 45,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: Colors.white30,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                    ),
+
+                    const SizedBox(height: 25),
+
+                    const Text(
+                      'Edit wardrobe item',
+                      style: TextStyle(
+                        color: softWhite,
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+
+                    const SizedBox(height: 8),
+
+                    Text(
+                      item['name'] ?? 'Clothing item',
+                      style: const TextStyle(color: gold, fontSize: 13),
+                    ),
+
+                    const SizedBox(height: 22),
+
+                    _buildPhotoPicker(
+                      imageData: imageData,
+                      isPickingImage: false,
+                      isAnalyzingImage: false,
+                      onCamera: () {
+                        pickReplacementImage(ImageSource.camera);
+                      },
+                      onGallery: () {
+                        pickReplacementImage(ImageSource.gallery);
+                      },
+                      onRemove: () {
+                        setSheetState(() {
+                          imageData = null;
+                        });
+                      },
+                    ),
+
+                    const SizedBox(height: 24),
+
+                    const Text(
+                      'Category',
+                      style: TextStyle(
+                        color: softWhite,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+
+                    const SizedBox(height: 8),
+
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 15),
+                      decoration: BoxDecoration(
+                        color: card,
+                        borderRadius: BorderRadius.circular(15),
+                        border: Border.all(color: gold.withValues(alpha: 0.25)),
+                      ),
+                      child: DropdownButtonHideUnderline(
+                        child: DropdownButton<String>(
+                          value: category,
+                          isExpanded: true,
+                          dropdownColor: card,
+                          icon: const Icon(
+                            Icons.keyboard_arrow_down,
+                            color: gold,
+                          ),
+                          style: const TextStyle(
+                            color: softWhite,
+                            fontSize: 14,
+                          ),
+                          items: categories
+                              .where((item) => item != 'All')
+                              .map(
+                                (item) => DropdownMenuItem<String>(
+                                  value: item,
+                                  child: Text(item),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: (value) {
+                            if (value == null) return;
+
+                            setSheetState(() {
+                              category = value;
+                              loadDetailsForCategory(category);
+                            });
+                          },
+                        ),
+                      ),
+                    ),
+
+                    const SizedBox(height: 18),
+
+                    _WardrobeTextField(
+                      controller: colorController,
+                      label: 'Color',
+                      hint: 'e.g. Black, cream, burgundy, multicolor',
+                    ),
+
+                    const SizedBox(height: 20),
+
+                    const Text(
+                      'Item details',
+                      style: TextStyle(
+                        color: softWhite,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+
+                    const SizedBox(height: 12),
+
+                    ...fields.map((field) {
+                      final String label = field['label'] as String;
+                      final List<String> options = List<String>.from(
+                        field['options'] as List,
+                      );
+
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 13),
+                        child: _DynamicDropdown(
+                          label: label,
+                          value: details[label] ?? '',
+                          options: options,
+                          onChanged: (value) {
+                            setSheetState(() {
+                              details[label] = value ?? '';
+                            });
+                          },
+                        ),
+                      );
+                    }),
+
+                    const SizedBox(height: 5),
+
+                    _WardrobeTextField(
+                      controller: notesController,
+                      label: 'Notes',
+                      hint: 'Anything Vestra should know about this piece...',
+                      maxLines: 3,
+                    ),
+
+                    const SizedBox(height: 25),
+
+                    _buildItemPreview(
+                      category: category,
+                      color: colorController.text,
+                      details: details,
+                    ),
+
+                    const SizedBox(height: 20),
+
+                    SizedBox(
+                      width: double.infinity,
+                      height: 56,
+                      child: ElevatedButton(
+                        onPressed: () async {
+                          if (colorController.text.trim().isEmpty) {
+                            ScaffoldMessenger.of(sheetContext).showSnackBar(
+                              const SnackBar(
+                                content: Text('Please enter the color.'),
+                              ),
+                            );
+                            return;
+                          }
+
+                          final updatedItem = Map<String, String>.from(item);
+
+                          updatedItem['category'] = category;
+                          updatedItem['color'] = colorController.text.trim();
+                          updatedItem['notes'] = notesController.text.trim();
+
+                          // Regenerate the display name from the edited
+                          // category, color, and clothing details so the
+                          // name stays synchronized with the item.
+                          updatedItem['name'] = _generateItemName(
+                            category,
+                            colorController.text.trim(),
+                            details,
+                          );
+
+                          if (imageData == null || imageData!.isEmpty) {
+                            updatedItem.remove('imageData');
+                          } else {
+                            updatedItem['imageData'] = imageData!;
+                          }
+
+                          final oldFields = _getCategoryFields(
+                            item['category'] ?? category,
+                          );
+
+                          for (final field in oldFields) {
+                            updatedItem.remove(
+                              _normalizeKey(field['label'] as String),
+                            );
+                          }
+
+                          for (final entry in details.entries) {
+                            if (entry.value.isNotEmpty) {
+                              updatedItem[_normalizeKey(entry.key)] =
+                                  entry.value;
+                            }
+                          }
+
+                          try {
+                            await WardrobeStore.updateItem(updatedItem);
+
+                            if (!mounted) return;
+
+                            setState(() {});
+                            Navigator.pop(sheetContext);
+
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'Wardrobe item updated successfully.',
+                                ),
+                                behavior: SnackBarBehavior.floating,
+                              ),
+                            );
+                          } catch (error) {
+                            if (!sheetContext.mounted) return;
+
+                            ScaffoldMessenger.of(sheetContext).showSnackBar(
+                              SnackBar(
+                                content: Text('Could not update item: $error'),
+                                behavior: SnackBarBehavior.floating,
+                              ),
+                            );
+                          }
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: gold,
+                          foregroundColor: Colors.black,
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                        ),
+                        child: const Text(
+                          'SAVE CHANGES',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 1,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  // ================================================================
   // PHOTO PICKER
   // ================================================================
 
   Widget _buildPhotoPicker({
     required String? imageData,
     required bool isPickingImage,
+    required bool isAnalyzingImage,
     required VoidCallback onCamera,
     required VoidCallback onGallery,
     required VoidCallback onRemove,
@@ -751,7 +1401,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
                     width: double.infinity,
                     height: 230,
                     child: Image.memory(
-                      base64Decode(imageData!),
+                      base64Decode(imageData),
                       fit: BoxFit.cover,
                       errorBuilder: (context, error, stackTrace) {
                         return const Center(
@@ -841,7 +1491,9 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
               children: [
                 Expanded(
                   child: OutlinedButton.icon(
-                    onPressed: isPickingImage ? null : onCamera,
+                    onPressed: (isPickingImage || isAnalyzingImage)
+                        ? null
+                        : onCamera,
                     icon: const Icon(Icons.camera_alt_outlined, size: 19),
                     label: const Text(
                       'CAMERA',
@@ -866,7 +1518,9 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
 
                 Expanded(
                   child: OutlinedButton.icon(
-                    onPressed: isPickingImage ? null : onGallery,
+                    onPressed: (isPickingImage || isAnalyzingImage)
+                        ? null
+                        : onGallery,
                     icon: const Icon(Icons.photo_library_outlined, size: 19),
                     label: const Text(
                       'GALLERY',
@@ -1865,9 +2519,14 @@ class _WardrobeTextField extends StatelessWidget {
 
 class _WardrobeItemCard extends StatelessWidget {
   final Map<String, String> item;
+  final VoidCallback onEdit;
   final VoidCallback onDelete;
 
-  const _WardrobeItemCard({required this.item, required this.onDelete});
+  const _WardrobeItemCard({
+    required this.item,
+    required this.onEdit,
+    required this.onDelete,
+  });
 
   static const Color gold = Color(0xFFD4AF37);
   static const Color card = Color(0xFF151515);
@@ -1923,7 +2582,7 @@ class _WardrobeItemCard extends StatelessWidget {
   }
 
   String _buildDetails() {
-    final ignored = {'name', 'category', 'color', 'notes', 'imageData'};
+    final ignored = {'id', 'name', 'category', 'color', 'notes', 'imageData'};
 
     final details = <String>[];
 
@@ -2060,9 +2719,42 @@ class _WardrobeItemCard extends StatelessWidget {
             ),
           ),
 
-          IconButton(
-            onPressed: onDelete,
-            icon: const Icon(Icons.delete_outline, color: Colors.white54),
+          PopupMenuButton<String>(
+            color: card,
+            icon: const Icon(Icons.more_vert, color: Colors.white54),
+            onSelected: (value) {
+              if (value == 'edit') {
+                onEdit();
+              } else if (value == 'delete') {
+                onDelete();
+              }
+            },
+            itemBuilder: (context) => const [
+              PopupMenuItem<String>(
+                value: 'edit',
+                child: Row(
+                  children: [
+                    Icon(Icons.edit_outlined, color: gold, size: 20),
+                    SizedBox(width: 10),
+                    Text('Edit', style: TextStyle(color: softWhite)),
+                  ],
+                ),
+              ),
+              PopupMenuItem<String>(
+                value: 'delete',
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.delete_outline,
+                      color: Colors.redAccent,
+                      size: 20,
+                    ),
+                    SizedBox(width: 10),
+                    Text('Delete', style: TextStyle(color: softWhite)),
+                  ],
+                ),
+              ),
+            ],
           ),
         ],
       ),
