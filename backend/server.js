@@ -2,6 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const dotenv = require("dotenv");
 const { createClient } = require("@supabase/supabase-js");
+const crypto = require("crypto");
 
 dotenv.config();
 
@@ -1648,6 +1649,7 @@ Return exactly:
       "description": "string",
       "reasoning": "string",
       "stylingDirection": "string",
+      "presentationDirection": "string",
       "variationAxes": ["string", "string"],
       "selectedItemIds": ["string"],
       "suggestedPieces": [
@@ -1712,6 +1714,35 @@ or other accessory unless that specific item is genuinely the strongest
 choice for that particular look.
 
 Every visualPrompt must describe ONE complete outfit.
+
+Every presentationDirection must describe HOW that specific outfit should be visually presented.
+
+Choose the presentation that best communicates the actual garments, silhouette, proportions, layering, accessories, and styling intent of that look.
+
+Presentation directions may include, when appropriate:
+- full-body fashion editorial
+- ghost mannequin / invisible model
+- garment-focused studio presentation
+- editorial model presentation with the face excluded
+- dynamic fashion pose emphasizing movement and silhouette
+- seated or posed editorial presentation when it better communicates the outfit
+- close-up garment/detail presentation when material, construction, or accessories are important
+- flat-lay or arranged garment presentation when the outfit is best understood as a coordinated composition
+
+Do NOT choose a presentation merely for variety.
+
+The presentation must be appropriate to the specific outfit, occasion, garment structure, and styling direction.
+
+For example:
+- A structured suit may benefit from a full-body editorial presentation showing its tailoring and proportions.
+- A dramatic statement coat may benefit from a dynamic editorial presentation that shows its silhouette and movement.
+- A detailed dress may benefit from a presentation that clearly shows its length, drape, slit, neckline, and overall silhouette.
+- A layered outfit may benefit from a full-body presentation where every layer remains clearly visible.
+- Accessories or intricate garment details may require a closer garment-focused presentation.
+
+Do not introduce a recognizable real person, celebrity, or unrelated model identity.
+
+Every presentationDirection must be specific enough for the image-generation system to understand the intended composition.
 
 Return nothing outside the JSON.
 `;
@@ -3510,7 +3541,10 @@ Return only valid JSON.
 
 app.post("/api/outfit/generate", async (req, res) => {
   try {
-    const { outfit, visualStyle = "ghost mannequin" } = req.body;
+    const {
+  outfit,
+  visualStyle = "adaptive editorial presentation",
+} = req.body;
 
     if (!outfit) {
       return res.status(400).json({
@@ -3548,26 +3582,28 @@ app.post("/api/outfit/generate", async (req, res) => {
     const imagePrompt = `
 Create a high-end fashion editorial image of the following outfit.
 
-The outfit should be displayed on a completely invisible
-ghost mannequin / invisible model.
+Present the outfit using the presentation direction provided below.
+
+The presentation may use a fashion model, ghost mannequin,
+garment-focused studio composition, flat-lay, or another editorial
+composition when that format best communicates the specific outfit.
 
 IMPORTANT:
-- Show ONLY the clothing and accessories.
-- Do NOT show a human face.
-- Do NOT show a recognizable person.
-- Do NOT add a model's head.
-- Do NOT add hands, feet, or exposed body parts unless
-  absolutely necessary to communicate the garment structure.
-- Keep the clothing proportions realistic.
+- Follow the presentationDirection as the primary composition instruction.
+- Keep the complete outfit clearly visible unless the presentationDirection specifically calls for a detail-focused composition.
+- If a model is appropriate, use a non-recognizable editorial fashion model whose appearance does not distract from the clothing.
+- Never depict a celebrity, public figure, or recognizable real person.
+- Keep body proportions and garment proportions realistic.
 - Preserve the garment colors, materials, textures, silhouettes,
   layering, proportions, and accessories described in the prompt.
-- Present the outfit as a premium fashion editorial.
-- Use realistic studio-quality lighting.
-- Use a clean, sophisticated background.
-- Make the individual garments easy to see.
+- Preserve the intended fit, drape, length, structure, and styling relationships between garments.
+- Present the outfit as a premium high-fashion editorial.
+- Use realistic editorial-quality lighting appropriate to the presentation.
+- Use a clean, sophisticated setting or background appropriate to the presentation.
+- Make the important garments and styling decisions easy to understand.
 - Do not add clothing that is not described.
 - Do not remove important clothing described in the prompt.
-
+- Do not alter the core outfit merely to make the image more visually dramatic.
 Visual presentation style:
 ${visualStyle}
 
@@ -3680,6 +3716,14 @@ app.post(
   async (req, res) => {
     try {
       const { imageBase64 } = req.body || {};
+      const imageHash = crypto
+  .createHash("sha256")
+  .update(imageBase64 || "")
+  .digest("hex");
+
+console.log(
+  `[WARDROBE OUTFIT] Image received | length=${imageBase64?.length || 0} | hash=${imageHash}`
+);
 
       if (
         !imageBase64 ||
