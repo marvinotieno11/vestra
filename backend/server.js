@@ -2,7 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const dotenv = require("dotenv");
 const { createClient } = require("@supabase/supabase-js");
-const crypto = require("crypto");
+
 
 dotenv.config();
 
@@ -3716,14 +3716,8 @@ app.post(
   async (req, res) => {
     try {
       const { imageBase64 } = req.body || {};
-      const imageHash = crypto
-  .createHash("sha256")
-  .update(imageBase64 || "")
-  .digest("hex");
+      
 
-console.log(
-  `[WARDROBE OUTFIT] Image received | length=${imageBase64?.length || 0} | hash=${imageHash}`
-);
 
       if (
         !imageBase64 ||
